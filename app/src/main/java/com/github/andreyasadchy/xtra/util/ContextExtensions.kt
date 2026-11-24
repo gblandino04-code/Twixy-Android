@@ -35,11 +35,11 @@ fun Activity.applyTheme() {
     }
     val theme = if (prefs().getBoolean(C.UI_THEME_FOLLOW_SYSTEM, false)) {
         when (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
-            Configuration.UI_MODE_NIGHT_YES -> prefs().getString(C.UI_THEME_DARK_ON, "0") ?: "0"
+            Configuration.UI_MODE_NIGHT_YES -> prefs().getString(C.UI_THEME_DARK_ON, "3") ?: "3"
             else -> prefs().getString(C.UI_THEME_DARK_OFF, "2") ?: "2"
         }
     } else {
-        prefs().getString(C.THEME, "0") ?: "0"
+        prefs().getString(C.THEME, "3") ?: "3"
     }
     if (prefs().getBoolean(C.UI_THEME_MATERIAL3, true)) {
         val reducedPadding = prefs().getBoolean(C.UI_THEME_REDUCED_PADDING, false)

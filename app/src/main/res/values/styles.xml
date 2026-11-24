@@ -3,13 +3,18 @@
     <style name="BaseDarkTheme" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/primaryBlue</item>
         <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorOnSecondaryContainer">@android:color/white</item>
         <item name="colorSurface">@color/surfaceBlue</item>
         <item name="android:colorBackground">@color/surfaceBlue</item>
+        <item name="android:windowBackground">@color/surfaceBlue</item>
+        <item name="colorSurfaceVariant">@color/surfaceContainerHighestBlue</item>
+        <item name="colorOutlineVariant">@color/cardStrokeBlue</item>
         <item name="colorSurfaceContainerLowest">@color/surfaceContainerLowestBlue</item>
         <item name="colorSurfaceContainerLow">@color/surfaceContainerLowBlue</item>
         <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
         <item name="colorSurfaceContainerHigh">@color/surfaceContainerHighBlue</item>
         <item name="colorSurfaceContainerHighest">@color/surfaceContainerHighestBlue</item>
+        <item name="bottomNavigationStyle">@style/BottomNavigationBlue</item>
         <item name="chatStatus">@color/chatStatusDark</item>
         <item name="sortBarTextColor">?android:textColorSecondary</item>
         <item name="dialogPadding">8dp</item>
@@ -88,8 +93,13 @@
 
     <style name="BaseBlueTheme" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/primaryBlue</item>
+        <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorOnSecondaryContainer">@android:color/white</item>
         <item name="colorSurface">@color/surfaceBlue</item>
         <item name="android:colorBackground">@color/surfaceBlue</item>
+        <item name="android:windowBackground">@color/surfaceBlue</item>
+        <item name="colorSurfaceVariant">@color/surfaceContainerHighestBlue</item>
+        <item name="colorOutlineVariant">@color/cardStrokeBlue</item>
         <item name="colorSurfaceContainerLowest">@color/surfaceContainerLowestBlue</item>
         <item name="colorSurfaceContainerLow">@color/surfaceContainerLowBlue</item>
         <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
@@ -1129,6 +1139,8 @@
 
     <style name="Card" parent="Widget.Material3.CardView.Elevated">
         <item name="android:layout_margin">8dp</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
     </style>
 
     <style name="CardAmoled" parent="Widget.Material3.CardView.Elevated">
@@ -1191,7 +1203,9 @@
     </style>
 
     <style name="BottomNavigationOverlayBlue">
+        <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
         <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorOnSecondaryContainer">@android:color/white</item>
     </style>
 
     <style name="BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">

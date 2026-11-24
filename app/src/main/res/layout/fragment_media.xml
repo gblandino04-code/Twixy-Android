@@ -18,7 +18,11 @@
             android:layout_height="wrap_content"
             android:minHeight="?attr/actionBarSize"
             app:layout_scrollFlags="scroll|enterAlways"
-            app:menu="@menu/top_menu" />
+            app:menu="@menu/top_menu"
+            app:titleTextColor="@android:color/transparent">
+
+            <include layout="@layout/twixy_brand_header" />
+        </com.google.android.material.appbar.MaterialToolbar>
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/spinner"

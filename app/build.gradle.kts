@@ -27,8 +27,8 @@ android {
         applicationId = "com.peppez.twixy"
         minSdk = 24
         targetSdk = 37
-        versionCode = 122
-        versionName = "2.60.10-twixy"
+        versionCode = 123
+        versionName = "2.60.11-twixy"
     }
 
     buildTypes {

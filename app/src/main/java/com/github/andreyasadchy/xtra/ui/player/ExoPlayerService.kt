@@ -192,9 +192,9 @@ class ExoPlayerService : BasePlaybackService() {
                             loaded = true
                             serviceListener?.loaded()
                             toggleSubtitles(prefs().getBoolean(C.PLAYER_SUBTITLES_ENABLED, false))
-                        }
-                        if (qualities?.find { it.name == VideoQuality.AUTO_QUALITY } != null && quality?.name != VideoQuality.AUDIO_ONLY_QUALITY) {
-                            changeQuality(quality)
+                            if (qualities?.find { it.name == VideoQuality.AUTO_QUALITY } != null && quality?.name != VideoQuality.AUDIO_ONLY_QUALITY) {
+                                changeQuality(quality)
+                            }
                         }
                     }
                 }
@@ -217,6 +217,10 @@ class ExoPlayerService : BasePlaybackService() {
                         val list = playlist?.variants?.mapNotNull { variant ->
                             val name = variant.stableVariantId?.takeIf { it.isNotBlank() }
                                 ?: playlist.videos.find { it.groupId == variant.videoGroupId }?.name?.takeIf { it.isNotBlank() }
+                                ?: variant.format.height.takeIf { it > 0 }?.let { h ->
+                                    val fps = variant.format.frameRate.takeIf { it > 0f }?.toInt() ?: 30
+                                    "${h}p${fps}"
+                                }
                             if (name != null) {
                                 VideoQuality(name, variant.format.height, variant.format.frameRate, variant.format.bitrate, variant.format.codecs, variant.url.toString())
                             } else null
@@ -241,7 +245,7 @@ class ExoPlayerService : BasePlaybackService() {
                                 }
                             setDefaultQuality()
                             serviceListener?.changePlayerMode()
-                            if (quality?.name == VideoQuality.AUDIO_ONLY_QUALITY) {
+                            if (quality != null && quality?.name != VideoQuality.AUTO_QUALITY) {
                                 changeQuality(quality)
                             }
                         }
@@ -770,7 +774,7 @@ class ExoPlayerService : BasePlaybackService() {
                                     && (it.proxyPlaybackAccessToken || it.proxyMultivariantPlaylist || it.proxyMediaPlaylist)
                         }.sortedBy { it.position }
                     }
-                    useVideoSwap = prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
+                    useVideoSwap = !useCustomProxy && !useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
                     if (useVideoSwap) {
                         videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
                             it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
@@ -913,8 +917,8 @@ class ExoPlayerService : BasePlaybackService() {
             if (restart || qualities.isNullOrEmpty()) {
                 val proxyUrl = if (useCustomProxy) {
                     customProxyList?.getOrNull(currentCustomProxy)?.let { proxy ->
-                        proxy.url?.let { proxyUrl ->
-                            (proxyUrl.toUri().takeIf { it.host != null } ?: "https://$proxyUrl".toUri()).let { uri ->
+                        proxy.url?.replace("\$channel", channelLogin)?.let { rawProxyUrl ->
+                            (rawProxyUrl.toUri().takeIf { it.host != null } ?: "https://$rawProxyUrl".toUri()).let { uri ->
                                 if (proxy.addQueryParams) {
                                     val source = uri.getQueryParameter("allow_source") == null
                                     val audio = uri.getQueryParameter("allow_audio_only") == null
@@ -942,7 +946,7 @@ class ExoPlayerService : BasePlaybackService() {
                                         }.build()
                                     } else uri
                                 } else uri
-                            }.toString().replace("\$channel", channelLogin)
+                            }.toString().replace("\$channel", channelLogin).replace("%24channel", channelLogin)
                         }
                     }
                 } else null
@@ -950,6 +954,14 @@ class ExoPlayerService : BasePlaybackService() {
                     playlistUrl = proxyUrl
                 } else {
                     useCustomProxy = false
+                    if (!useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)) {
+                        useVideoSwap = true
+                        if (videoSwapList.isNullOrEmpty()) {
+                            videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
+                                it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
+                            }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_VIDEO_SWAPS }
+                        }
+                    }
                     val url = if (streamProxy?.proxyPlaybackAccessToken == true) {
                         var url: String?
                         while (true) {
@@ -1521,12 +1533,15 @@ class ExoPlayerService : BasePlaybackService() {
                                         player.seekTo(position)
                                     }
                                 }
-                            } else {
+                            } else if (player.playbackState == Player.STATE_IDLE) {
                                 player.prepare()
                             }
                             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
                                 setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, false)
                                 clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_VIDEO)
+                                setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                                setViewportSize(Int.MAX_VALUE, Int.MAX_VALUE, false)
+                                setForceHighestSupportedBitrate(false)
                             }.build()
                         }
                         VideoQuality.AUDIO_ONLY_QUALITY -> {
@@ -1558,35 +1573,43 @@ class ExoPlayerService : BasePlaybackService() {
                                         player.prepare()
                                         player.seekTo(position)
                                     }
-                                } else {
+                                } else if (player.playbackState == Player.STATE_IDLE) {
                                     player.prepare()
                                 }
                                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
                                     setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, false)
+                                    setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                                    setViewportSize(Int.MAX_VALUE, Int.MAX_VALUE, false)
+                                    setForceHighestSupportedBitrate(true)
                                     if (!player.currentTracks.isEmpty) {
                                         player.currentTracks.groups.find { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }?.let { trackGroup ->
                                             if (trackGroup.mediaTrackGroup.length > 0) {
-                                                if (quality.resolution != null) {
-                                                    val formats = mutableListOf<Pair<Int, Format>>()
-                                                    for (i in 0 until trackGroup.mediaTrackGroup.length) {
-                                                        formats.add(i to trackGroup.mediaTrackGroup.getFormat(i))
-                                                    }
-                                                    val list = formats
-                                                        .sortedByDescending { it.second.bitrate }
-                                                        .sortedByDescending { it.second.frameRate }
-                                                        .sortedByDescending { it.second.height }
-                                                    list.find {
-                                                        (quality.resolution == it.second.height
-                                                                && (quality.frameRate?.let { fps -> floor(fps) } ?: 30f) >= floor(it.second.frameRate)
-                                                                && (quality.bitrate == null || quality.bitrate >= it.second.bitrate))
-                                                                || quality.resolution > it.second.height
-                                                                || it == list.last()
-                                                    }?.first?.let { index ->
-                                                        setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, index))
-                                                    }
-                                                } else {
-                                                    setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, 0))
+                                                val formats = mutableListOf<Pair<Int, Format>>()
+                                                for (i in 0 until trackGroup.mediaTrackGroup.length) {
+                                                    formats.add(i to trackGroup.mediaTrackGroup.getFormat(i))
                                                 }
+                                                val list = formats
+                                                    .sortedByDescending { it.second.bitrate }
+                                                    .sortedByDescending { it.second.frameRate }
+                                                    .sortedByDescending { it.second.height }
+                                                val targetIdx = if (quality.name == VideoQuality.SOURCE_QUALITY || quality.resolution == null) {
+                                                    list.firstOrNull()?.first ?: 0
+                                                } else {
+                                                    val targetH = quality.resolution
+                                                    val targetFps = quality.frameRate?.takeIf { it > 0f }
+                                                    val exactHeight = list.filter { it.second.height == targetH }
+                                                    val chosen = if (exactHeight.isNotEmpty()) {
+                                                        if (targetFps != null) {
+                                                            exactHeight.minByOrNull { kotlin.math.abs(it.second.frameRate - targetFps) }
+                                                        } else {
+                                                            exactHeight.firstOrNull()
+                                                        }
+                                                    } else {
+                                                        list.find { it.second.height <= targetH } ?: list.firstOrNull()
+                                                    }
+                                                    chosen?.first ?: 0
+                                                }
+                                                setOverrideForType(TrackSelectionOverride(trackGroup.mediaTrackGroup, targetIdx))
                                             }
                                         }
                                     }
@@ -1818,14 +1841,15 @@ class ExoPlayerService : BasePlaybackService() {
                     } else null
                     if (!playlist.isNullOrBlank()) {
                         val stableVariantIds = Regex("STABLE-VARIANT-ID=\"(.+?)\"").findAll(playlist).mapNotNull { it.groups[1]?.value }.toList()
+                        val videoIds = if (stableVariantIds.isNotEmpty()) stableVariantIds else Regex("VIDEO=\"(.+?)\"").findAll(playlist).mapNotNull { it.groups[1]?.value }.toList()
                         val resolutions = Regex("RESOLUTION=(\\d+x\\d+)").findAll(playlist).mapNotNull { it.groups[1]?.value }.toList()
                         val frameRates = Regex("FRAME-RATE=([\\d.]+)\\b").findAll(playlist).mapNotNull { it.groups[1]?.value?.toFloatOrNull() }.toList()
                         val bitrates = Regex("BANDWIDTH=(\\d+)\\b").findAll(playlist).mapNotNull { it.groups[1]?.value?.toIntOrNull() }.toList()
                         val codecs = Regex("CODECS=\"(.+?)\"").findAll(playlist).mapNotNull { it.groups[1]?.value }.toList()
                         val urls = Regex("https://.*\\.m3u8").findAll(playlist).map(MatchResult::value).toList()
-                        val list = stableVariantIds.mapIndexedNotNull { index, variantId ->
+                        val list = videoIds.mapIndexedNotNull { index, variantId ->
                             urls.getOrNull(index)?.let { url ->
-                                if (!variantId.endsWith("-portrait")) {
+                                if (!variantId.endsWith("-portrait") && !variantId.startsWith("audio", true)) {
                                     VideoQuality(variantId, resolutions.getOrNull(index)?.substringAfter('x')?.toIntOrNull(), frameRates.getOrNull(index), bitrates.getOrNull(index), codecs.getOrNull(index), url)
                                 } else null
                             }

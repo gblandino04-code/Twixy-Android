@@ -162,7 +162,7 @@ abstract class BasePlaybackService : LifecycleService() {
         }?.substringBefore(" ")
         quality = when (defaultQuality) {
             "saved" -> {
-                val savedQuality = prefs().getString(C.PLAYER_QUALITY, "720p60")?.substringBefore(" ")
+                val savedQuality = prefs().getString(C.PLAYER_QUALITY, VideoQuality.SOURCE_QUALITY)?.substringBefore(" ")
                 when (savedQuality) {
                     VideoQuality.AUTO_QUALITY -> qualities?.find { it.name == VideoQuality.AUTO_QUALITY }
                     VideoQuality.AUDIO_ONLY_QUALITY -> qualities?.find { it.name == VideoQuality.AUDIO_ONLY_QUALITY }
