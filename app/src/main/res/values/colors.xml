@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="darkScrim">#CC070C1B</color>
+    <color name="lightScrim">#E6EEF1F6</color>
+    <color name="accent">#5821BE</color>
+    <color name="accentHover">#6E35D9</color>
+    <color name="surfaceAmoled">#FF050814</color>
+    <color name="surfaceContainerAmoled">#070D1E</color>
+    <color name="switchTrackAmoled">#362066</color>
+    <color name="primaryBlue">#B490FF</color>
+    <color name="secondaryContainerBlue">#362066</color>
+    <color name="surfaceBlue">#070C1B</color>
+    <color name="surfaceContainerLowestBlue">#050814</color>
+    <color name="surfaceContainerLowBlue">#070D1E</color>
+    <color name="surfaceContainerBlue">#080E21</color>
+    <color name="surfaceContainerHighBlue">#0A1229</color>
+    <color name="surfaceContainerHighestBlue">#221740</color>
+    <color name="surfaceDark">#070C1B</color>
+    <color name="secondaryDark">#080E21</color>
+    <color name="secondaryTextColorDark">#8FA0C7</color>
+    <color name="secondaryAmoled">#0A1229</color>
+    <color name="secondaryLight">#E9EDF5</color>
+    <color name="secondaryTextColorLight">#475569</color>
+    <color name="secondaryBlue">#050814</color>
+    <color name="secondaryTextColorBlue">#8FA0C7</color>
+    <color name="chatStatusDark">#CC050813</color>
+    <color name="chatStatusLight">#CCEEF1F6</color>
+    <color name="chatMessageFirst">#800A4028</color>
+    <color name="chatMessageReward">#801E1B4B</color>
+    <color name="chatMessageNotice">#80362066</color>
+    <color name="chatMessageMention">#80680E0E</color>
+    <color name="chatMessageSelected">#805821BE</color>
+    <color name="liveStreamRed">#DC2626</color>
+    <color name="online">#22C55E</color>
+    <color name="offline">#DC2626</color>
+</resources>
