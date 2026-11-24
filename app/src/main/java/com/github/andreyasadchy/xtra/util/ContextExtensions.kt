@@ -214,16 +214,15 @@ fun Activity.applyTheme() {
                 }
             }
         }
-        if (theme == "4" || theme == "6" || theme == "5") {
+        if (theme == "6" || theme == "5") {
             DynamicColors.applyToActivityIfAvailable(
                 this,
                 DynamicColorsOptions.Builder().apply {
                     setThemeOverlay(
                         when (theme) {
-                            "4" -> R.style.DarkDynamicOverlay
                             "6" -> R.style.AmoledDynamicOverlay
                             "5" -> R.style.LightDynamicOverlay
-                            else -> R.style.DarkDynamicOverlay
+                            else -> R.style.AmoledDynamicOverlay
                         }
                     )
                 }.build()

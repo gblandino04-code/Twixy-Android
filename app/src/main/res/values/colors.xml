@@ -8,6 +8,8 @@
     <color name="surfaceContainerAmoled">#0A1024</color>
     <color name="switchTrackAmoled">#3B1E7A</color>
     <color name="primaryBlue">#B490FF</color>
+    <color name="onPrimaryBlue">#160A36</color>
+    <color name="onSurfaceBlue">#F3F6FF</color>
     <color name="secondaryContainerBlue">#43208A</color>
     <color name="surfaceBlue">#0B132B</color>
     <color name="surfaceContainerLowestBlue">#080F24</color>

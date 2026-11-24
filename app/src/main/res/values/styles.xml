@@ -2,18 +2,29 @@
 
     <style name="BaseDarkTheme" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/primaryBlue</item>
+        <item name="colorOnPrimary">@color/onPrimaryBlue</item>
+        <item name="colorPrimaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorOnPrimaryContainer">@android:color/white</item>
+        <item name="colorSecondary">@color/accentHover</item>
+        <item name="colorOnSecondary">@android:color/white</item>
         <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
         <item name="colorOnSecondaryContainer">@android:color/white</item>
+        <item name="colorTertiary">@color/accent</item>
+        <item name="colorOnTertiary">@android:color/white</item>
         <item name="colorSurface">@color/surfaceBlue</item>
+        <item name="colorOnSurface">@color/onSurfaceBlue</item>
+        <item name="colorOnSurfaceVariant">@color/secondaryTextColorBlue</item>
         <item name="android:colorBackground">@color/surfaceBlue</item>
         <item name="android:windowBackground">@color/surfaceBlue</item>
         <item name="colorSurfaceVariant">@color/surfaceContainerHighestBlue</item>
+        <item name="colorOutline">@color/cardStrokeBlue</item>
         <item name="colorOutlineVariant">@color/cardStrokeBlue</item>
         <item name="colorSurfaceContainerLowest">@color/surfaceContainerLowestBlue</item>
         <item name="colorSurfaceContainerLow">@color/surfaceContainerLowBlue</item>
         <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
         <item name="colorSurfaceContainerHigh">@color/surfaceContainerHighBlue</item>
         <item name="colorSurfaceContainerHighest">@color/surfaceContainerHighestBlue</item>
+        <item name="appBarLayoutStyle">@style/TwixyAppBarLayout</item>
         <item name="bottomNavigationStyle">@style/BottomNavigationBlue</item>
         <item name="chatStatus">@color/chatStatusDark</item>
         <item name="sortBarTextColor">?android:textColorSecondary</item>
@@ -21,11 +32,11 @@
         <item name="dialogLayoutPadding">8dp</item>
         <item name="tabLayoutHeight">48dp</item>
         <item name="bottomNavigationHeight">80dp</item>
-        <item name="cardStyle">@style/Card</item>
+        <item name="cardStyle">@style/CardBlue</item>
         <item name="bottomSheetButtonStyle">@style/Widget.Material3.Button.ElevatedButton</item>
         <item name="elevatedButtonStyle">@style/Widget.Material3.Button.ElevatedButton</item>
         <item name="dialogButtonStyle">@style/Widget.Material3.Button.TextButton.Dialog</item>
-        <item name="tabStyle">@style/Widget.Material3.TabLayout.OnSurface</item>
+        <item name="tabStyle">@style/TwixyTabLayout</item>
         <item name="radioButtonStyle">@style/RadioButton</item>
         <item name="checkboxStyle">@style/CheckBox</item>
         <item name="materialSwitchStyle">@style/SwitchBlue</item>
@@ -93,29 +104,40 @@
 
     <style name="BaseBlueTheme" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/primaryBlue</item>
+        <item name="colorOnPrimary">@color/onPrimaryBlue</item>
+        <item name="colorPrimaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorOnPrimaryContainer">@android:color/white</item>
+        <item name="colorSecondary">@color/accentHover</item>
+        <item name="colorOnSecondary">@android:color/white</item>
         <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
         <item name="colorOnSecondaryContainer">@android:color/white</item>
+        <item name="colorTertiary">@color/accent</item>
+        <item name="colorOnTertiary">@android:color/white</item>
         <item name="colorSurface">@color/surfaceBlue</item>
+        <item name="colorOnSurface">@color/onSurfaceBlue</item>
+        <item name="colorOnSurfaceVariant">@color/secondaryTextColorBlue</item>
         <item name="android:colorBackground">@color/surfaceBlue</item>
         <item name="android:windowBackground">@color/surfaceBlue</item>
         <item name="colorSurfaceVariant">@color/surfaceContainerHighestBlue</item>
+        <item name="colorOutline">@color/cardStrokeBlue</item>
         <item name="colorOutlineVariant">@color/cardStrokeBlue</item>
         <item name="colorSurfaceContainerLowest">@color/surfaceContainerLowestBlue</item>
         <item name="colorSurfaceContainerLow">@color/surfaceContainerLowBlue</item>
         <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
         <item name="colorSurfaceContainerHigh">@color/surfaceContainerHighBlue</item>
         <item name="colorSurfaceContainerHighest">@color/surfaceContainerHighestBlue</item>
+        <item name="appBarLayoutStyle">@style/TwixyAppBarLayout</item>
         <item name="chatStatus">@color/chatStatusDark</item>
         <item name="sortBarTextColor">?android:textColorSecondary</item>
         <item name="dialogPadding">8dp</item>
         <item name="dialogLayoutPadding">8dp</item>
         <item name="tabLayoutHeight">48dp</item>
         <item name="bottomNavigationHeight">80dp</item>
-        <item name="cardStyle">@style/Card</item>
+        <item name="cardStyle">@style/CardBlue</item>
         <item name="bottomSheetButtonStyle">@style/Widget.Material3.Button.ElevatedButton</item>
         <item name="elevatedButtonStyle">@style/Widget.Material3.Button.ElevatedButton</item>
         <item name="dialogButtonStyle">@style/Widget.Material3.Button.TextButton.Dialog</item>
-        <item name="tabStyle">@style/Widget.Material3.TabLayout.OnSurface</item>
+        <item name="tabStyle">@style/TwixyTabLayout</item>
         <item name="radioButtonStyle">@style/RadioButton</item>
         <item name="checkboxStyle">@style/CheckBox</item>
         <item name="materialSwitchStyle">@style/SwitchBlue</item>
@@ -132,8 +154,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -166,7 +188,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -391,8 +413,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -470,7 +492,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -551,8 +573,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -585,7 +607,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -667,8 +689,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -746,7 +768,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -819,8 +841,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -853,7 +875,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
     </style>
@@ -935,8 +957,8 @@
         <item name="toolbarStyle">@style/CompactToolbar</item>
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
-        <item name="bottomNavigationStyle">@style/CompactBottomNavigation</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -1014,7 +1036,7 @@
         <item name="tabLayoutHeight">42dp</item>
         <item name="bottomNavigationHeight">40dp</item>
         <item name="bottomNavigationStyle">@style/CompactBottomNavigationBlue</item>
-        <item name="cardStyle">@style/CompactCard</item>
+        <item name="cardStyle">@style/CompactCardBlue</item>
         <item name="radioButtonStyle">@style/CompactRadioButton</item>
         <item name="checkboxStyle">@style/CompactCheckBox</item>
         <item name="textAppearanceDisplayLarge">@style/CompactTextDisplayLarge</item>
@@ -1090,8 +1112,15 @@
     <style name="AppCompatAmoledTheme" parent="BaseAppCompatAmoledTheme" />
     <style name="AppCompatBlueTheme" parent="BaseAppCompatBlueTheme" />
 
-    <style name="DarkDynamicOverlay" parent="ThemeOverlay.Material3.DynamicColors.Dark">
-        <item name="materialSwitchStyle">@style/Widget.Material3.CompoundButton.MaterialSwitch</item>
+    <style name="DarkDynamicOverlay" parent="ThemeOverlay.Material3.Dark">
+        <item name="colorPrimary">@color/primaryBlue</item>
+        <item name="colorSecondaryContainer">@color/secondaryContainerBlue</item>
+        <item name="colorSurface">@color/surfaceBlue</item>
+        <item name="android:colorBackground">@color/surfaceBlue</item>
+        <item name="colorSurfaceContainerLow">@color/surfaceContainerLowBlue</item>
+        <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
+        <item name="colorSurfaceContainerHigh">@color/surfaceContainerHighBlue</item>
+        <item name="materialSwitchStyle">@style/SwitchBlue</item>
     </style>
 
     <style name="LightDynamicOverlay" parent="ThemeOverlay.Material3.DynamicColors.Light">
@@ -1137,10 +1166,36 @@
         <item name="cornerSizeBottomRight">0dp</item>
     </style>
 
+    <style name="TwixyAppBarLayout" parent="Widget.Material3.AppBarLayout">
+        <item name="android:background">@color/surfaceContainerBlue</item>
+        <item name="liftOnScrollColor">@color/surfaceContainerHighBlue</item>
+    </style>
+
+    <style name="TwixyTabLayout" parent="Widget.Material3.TabLayout.OnSurface">
+        <item name="android:background">@color/surfaceContainerBlue</item>
+        <item name="tabIndicatorColor">@color/primaryBlue</item>
+        <item name="tabSelectedTextColor">@color/primaryBlue</item>
+        <item name="tabTextColor">@color/secondaryTextColorBlue</item>
+    </style>
+
     <style name="Card" parent="Widget.Material3.CardView.Elevated">
         <item name="android:layout_margin">8dp</item>
         <item name="strokeWidth">1dp</item>
         <item name="strokeColor">?attr/colorOutlineVariant</item>
+    </style>
+
+    <style name="CardBlue" parent="Widget.Material3.CardView.Elevated">
+        <item name="android:layout_margin">8dp</item>
+        <item name="cardBackgroundColor">@color/surfaceContainerLowBlue</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="strokeColor">@color/cardStrokeBlue</item>
+    </style>
+
+    <style name="CompactCardBlue" parent="Widget.Material3.CardView.Elevated">
+        <item name="android:layout_margin">4dp</item>
+        <item name="cardBackgroundColor">@color/surfaceContainerLowBlue</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="strokeColor">@color/cardStrokeBlue</item>
     </style>
 
     <style name="CardAmoled" parent="Widget.Material3.CardView.Elevated">
@@ -1241,7 +1296,7 @@
         <item name="colorSurface">@color/surfaceDark</item>
         <item name="android:windowBackground">?attr/colorSurface</item>
         <item name="android:colorBackground">?attr/colorSurface</item>
-        <item name="colorSurfaceContainer">#303030</item>
+        <item name="colorSurfaceContainer">@color/surfaceContainerBlue</item>
         <item name="colorControlNormal">@android:color/white</item>
         <item name="android:textColor">?attr/colorControlNormal</item>
         <item name="android:textColorSecondary">@color/secondaryTextColorDark</item>

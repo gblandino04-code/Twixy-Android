@@ -2,7 +2,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <ListPreference
-        android:defaultValue="0"
+        android:defaultValue="3"
         android:entries="@array/themeEntries"
         android:entryValues="@array/themeValues"
         android:key="theme"
@@ -19,7 +19,7 @@
         app:singleLineTitle="false" />
 
     <ListPreference
-        android:defaultValue="0"
+        android:defaultValue="3"
         android:entries="@array/themeEntries"
         android:entryValues="@array/themeValues"
         android:key="ui_theme_dark_on"

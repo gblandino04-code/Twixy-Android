@@ -1209,9 +1209,8 @@ class MainActivity : AppCompatActivity() {
                     putString(C.PORTRAIT_COLUMN_COUNT, "2")
                     putString(C.LANDSCAPE_COLUMN_COUNT, "3")
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    putString(C.THEME, "4")
-                }
+                putString(C.THEME, "3")
+                putString(C.UI_THEME_DARK_ON, "3")
             }
         }
         if (version < 3) {
@@ -1390,6 +1389,19 @@ class MainActivity : AppCompatActivity() {
             viewModel.setDefaultVideoSwapItems()
             prefs.edit {
                 putInt(C.SETTINGS_VERSION, 17)
+            }
+        }
+        if (version < 18) {
+            prefs.edit {
+                val currentTheme = prefs.getString(C.THEME, null)
+                if (currentTheme.isNullOrBlank() || currentTheme == "4" || currentTheme == "0" || currentTheme == "6") {
+                    putString(C.THEME, "3")
+                }
+                val currentDarkOn = prefs.getString(C.UI_THEME_DARK_ON, null)
+                if (currentDarkOn.isNullOrBlank() || currentDarkOn == "4" || currentDarkOn == "0" || currentDarkOn == "6") {
+                    putString(C.UI_THEME_DARK_ON, "3")
+                }
+                putInt(C.SETTINGS_VERSION, 18)
             }
         }
     }
