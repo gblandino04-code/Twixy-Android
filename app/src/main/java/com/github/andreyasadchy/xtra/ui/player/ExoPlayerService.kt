@@ -59,6 +59,7 @@ import androidx.media3.exoplayer.hls.playlist.HlsPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParserFactory
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.ParsingLoadable
 import com.github.andreyasadchy.xtra.R
 import com.github.andreyasadchy.xtra.XtraApp
@@ -81,11 +82,14 @@ import com.github.andreyasadchy.xtra.util.TwitchApiHelper
 import com.github.andreyasadchy.xtra.util.prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Credentials
 import okhttp3.Request
 import org.chromium.net.CronetEngine
@@ -422,7 +426,7 @@ class ExoPlayerService : BasePlaybackService() {
                                     responseCode == 404 -> {
                                         serviceListener?.toast(R.string.stream_ended, Toast.LENGTH_LONG)
                                     }
-                                    useCustomProxy && (responseCode >= 400 || timeout) -> {
+                                    useCustomProxy && !loaded && (responseCode >= 400 || timeout) -> {
                                         val host = customProxyList?.getOrNull(currentCustomProxy)?.url?.let {
                                             it.toUri().host ?: "https://$it".toUri().host
                                         }
@@ -431,26 +435,31 @@ class ExoPlayerService : BasePlaybackService() {
                                             serviceListener?.toast(getString(R.string.proxy_error, host), Toast.LENGTH_LONG)
                                         }
                                         lifecycleScope.launch {
-                                            delay(1500.milliseconds)
+                                            delay(800.milliseconds)
                                             restartPlayer()
                                         }
                                     }
-                                    useStreamProxy && (responseCode >= 400 || timeout) -> {
+                                    useStreamProxy && !loaded && (responseCode >= 400 || timeout) -> {
                                         val host = streamProxyList?.getOrNull(currentStreamProxy)?.host
                                         currentStreamProxy += 1
                                         if (host != null) {
                                             serviceListener?.toast(getString(R.string.proxy_error, host), Toast.LENGTH_LONG)
                                         }
                                         lifecycleScope.launch {
-                                            delay(1500.milliseconds)
+                                            delay(800.milliseconds)
                                             restartPlayer()
                                         }
                                     }
                                     else -> {
-                                        serviceListener?.toast(R.string.player_error, Toast.LENGTH_SHORT)
+                                        // Recupero morbido su packet loss estremo senza disattivare il proxy anti-ad Luminous
                                         lifecycleScope.launch {
-                                            delay(1500.milliseconds)
-                                            restartPlayer()
+                                            delay(700.milliseconds)
+                                            if (loaded && player != null) {
+                                                player?.prepare()
+                                                player?.playWhenReady = !paused
+                                            } else {
+                                                restartPlayer()
+                                            }
                                         }
                                     }
                                 }
@@ -770,7 +779,8 @@ class ExoPlayerService : BasePlaybackService() {
                     }
                     if (useCustomProxy) {
                         customProxyList = xtraModule.playerRepository.getCustomProxies().filter {
-                            it.enabled && !it.url.isNullOrBlank()
+                            val u = it.url ?: ""
+                            it.enabled && u.isNotBlank() && !u.contains("cdn-perfprod.com") && !u.contains("eu3.luminous.dev") && !u.contains("ttv.lol")
                         }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_PROXIES }
                     }
                     if (useStreamProxy) {
@@ -783,9 +793,16 @@ class ExoPlayerService : BasePlaybackService() {
                     // se un proxy fa passare anche 1 sola mini-pubblicità, VideoSwap interviene istantaneamente!
                     useVideoSwap = !useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
                     if (useVideoSwap) {
-                        videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
+                        val dbSwaps = xtraModule.playerRepository.getVideoSwapItems().filter {
                             it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
-                        }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_VIDEO_SWAPS }
+                        }.sortedBy { it.position }
+                        val mergedSwaps = mutableListOf<VideoSwap>()
+                        for (sw in TWIXY_DEFAULT_VIDEO_SWAPS + dbSwaps) {
+                            if (mergedSwaps.none { it.platform.equals(sw.platform, true) && it.playerType.equals(sw.playerType, true) }) {
+                                mergedSwaps.add(VideoSwap(sw.platform, sw.playerType, mergedSwaps.size, true))
+                            }
+                        }
+                        videoSwapList = mergedSwaps
                     }
                     loadStream(restorePauseState)
                 }
@@ -960,12 +977,14 @@ class ExoPlayerService : BasePlaybackService() {
                 if (!useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)) {
                     useVideoSwap = true
                     if (videoSwapList.isNullOrEmpty()) {
-                        videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
-                            it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
-                        }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_VIDEO_SWAPS }
+                        videoSwapList = TWIXY_DEFAULT_VIDEO_SWAPS
                     }
                 }
-                if (proxyUrl != null) {
+                val preflight = resolveCleanLiveStreamUrl(channelLogin, proxyUrl, streamProxy)
+                if (preflight != null) {
+                    playlistUrl = preflight.first
+                    useCustomProxy = preflight.second
+                } else if (proxyUrl != null) {
                     playlistUrl = proxyUrl
                 } else {
                     useCustomProxy = false
@@ -1216,13 +1235,9 @@ class ExoPlayerService : BasePlaybackService() {
                             )
                         ).apply {
                             setPlaylistParserFactory(CustomHlsPlaylistParserFactory())
-                            setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(
-                                if (useCustomProxy || proxyMultivariantPlaylist) {
-                                    1
-                                } else {
-                                    6
-                                }
-                            ))
+                            setLoadErrorHandlingPolicy(
+                                TwixyLoadErrorPolicy { !loaded && (useCustomProxy || proxyMultivariantPlaylist) }
+                            )
                         }.createMediaSource(
                             MediaItem.Builder().apply {
                                 setUri(url.toUri())
@@ -1230,7 +1245,7 @@ class ExoPlayerService : BasePlaybackService() {
                                 setLiveConfiguration(MediaItem.LiveConfiguration.Builder().apply {
                                     prefs().getString(C.PLAYER_LIVE_MIN_SPEED, "")?.toFloatOrNull()?.let { setMinPlaybackSpeed(it) }
                                     prefs().getString(C.PLAYER_LIVE_MAX_SPEED, "")?.toFloatOrNull()?.let { setMaxPlaybackSpeed(it) }
-                                    prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "2000")?.toLongOrNull()?.let { setTargetOffsetMs(it) }
+                                    prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "4500")?.toLongOrNull()?.let { setTargetOffsetMs(it) }
                                 }.build())
                             }.build()
                         )
@@ -1240,6 +1255,165 @@ class ExoPlayerService : BasePlaybackService() {
                     player.prepare()
                     player.playWhenReady = !restorePauseState || !paused
                 }
+            }
+        }
+    }
+
+    private fun rawMediaPlaylistHasAds(mediaText: String): Boolean {
+        for (rawLine in mediaText.lineSequence()) {
+            val line = rawLine.trim()
+            if (line.isEmpty()) continue
+            if (line.startsWith("#EXT-X-DATERANGE", ignoreCase = true)) {
+                if (line.contains("stitched-ad", ignoreCase = true)
+                    || line.contains("twitch-ad", ignoreCase = true)
+                    || line.contains("X-TV-TWITCH-AD-", ignoreCase = true)
+                ) {
+                    return true
+                }
+            } else if (line.startsWith("#EXTINF:", ignoreCase = true)) {
+                val title = line.substringAfter(',', "").trim()
+                if (isAdSegmentTitleOrUrl(title, null)) {
+                    return true
+                }
+            } else if (!line.startsWith("#")) {
+                if (isAdSegmentTitleOrUrl(null, line)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * Pre-flight parallelo anti-pre-roll e anti-packet-loss (stile Twixy PC):
+     * prima che ExoPlayer apra lo stream a t=0s, verifica in parallelo Luminous EU / EU2 / PS4 / AS
+     * e restituisce la prima playlist 1080p60 con 0 segmenti pubblicitari!
+     */
+    private suspend fun resolveCleanLiveStreamUrl(
+        channelLogin: String,
+        primaryProxyUrl: String?,
+        streamProxy: StreamProxy?
+    ): Pair<String, Boolean>? {
+        if (streamProxy != null) return null
+        val ch = channelLogin.trim().lowercase()
+        if (ch.isEmpty()) return null
+        val qs = "allow_source=true&allow_audio_only=true&fast_bread=true&supported_codecs=h264"
+        val probeClient = xtraModule.okHttpClient.value.newBuilder()
+            .connectTimeout(2600, TimeUnit.MILLISECONDS)
+            .readTimeout(3200, TimeUnit.MILLISECONDS)
+            .build()
+
+        suspend fun probeMaster(url: String, isCustom: Boolean): Triple<String, Boolean, Boolean>? = withContext(Dispatchers.IO) {
+            try {
+                val masterBody = probeClient.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body.string() else null
+                } ?: return@withContext null
+                if (!masterBody.contains("#EXTM3U")) return@withContext null
+                val topVariant = Regex("https?://\\S+\\.m3u8\\S*").find(masterBody)?.value ?: return@withContext null
+                val mediaBody = probeClient.newCall(Request.Builder().url(topVariant).build()).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body.string() else null
+                } ?: return@withContext Triple(url, isCustom, false)
+                if (!mediaBody.contains("#EXTM3U") || !mediaBody.contains("#EXTINF:")) {
+                    return@withContext Triple(url, isCustom, false)
+                }
+                val clean = !rawMediaPlaylistHasAds(mediaBody)
+                Triple(url, isCustom, clean)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        return withTimeoutOrNull(4200L) {
+            coroutineScope {
+                val lumEu = primaryProxyUrl ?: "https://eu.luminous.dev/live/$ch?$qs"
+                val lumEu2 = "https://eu2.luminous.dev/live/$ch?$qs"
+                val lumAs = "https://as.luminous.dev/live/$ch?$qs"
+
+                val d0 = async { probeMaster(lumEu, true) }
+                val d1 = async {
+                    if (lumEu.contains("eu2.luminous.dev")) null else probeMaster(lumEu2, true)
+                }
+                val d2 = async {
+                    val ps4Url = try {
+                        xtraModule.playerRepository.loadStreamPlaylistUrl(
+                            context = this@ExoPlayerService,
+                            networkLibrary = C.OKHTTP,
+                            gqlHeaders = mapOf(C.HEADER_CLIENT_ID to "kimne78kx3ncx6brgo4mv6wki5h1ko"),
+                            channelLogin = ch,
+                            platform = "ps4",
+                            playerType = "site",
+                            supportedCodecs = "h264",
+                            proxyPlaybackAccessToken = false,
+                            proxyHost = null,
+                            proxyPort = null,
+                            proxyUser = null,
+                            proxyPassword = null,
+                            proxyTimeout = 2800,
+                            enableIntegrity = false
+                        )
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (!ps4Url.isNullOrBlank()) probeMaster(ps4Url, false) else null
+                }
+                val d3 = async {
+                    if (lumEu.contains("as.luminous.dev")) null else probeMaster(lumAs, true)
+                }
+
+                // Se il candidato primario (eu.luminous.dev) risponde subito pulito (~250ms), avvia immediatamente senza attendere gli altri!
+                val r0 = d0.await()
+                if (r0 != null && r0.third) {
+                    d1.cancel(); d2.cancel(); d3.cancel()
+                    return@coroutineScope r0.first to r0.second
+                }
+                val r1 = d1.await()
+                if (r1 != null && r1.third) {
+                    d2.cancel(); d3.cancel()
+                    return@coroutineScope r1.first to r1.second
+                }
+                val r2 = d2.await()
+                if (r2 != null && r2.third) {
+                    d3.cancel()
+                    return@coroutineScope r2.first to r2.second
+                }
+                val r3 = d3.await()
+                if (r3 != null && r3.third) {
+                    return@coroutineScope r3.first to r3.second
+                }
+
+                // Se tutte le sorgenti anonime sono in ad-break ma l'utente è loggato (es. Sub / Twitch Turbo), prova token autenticato
+                val authHeaders = TwitchApiHelper.getGQLHeaders(this@ExoPlayerService, true)
+                if (!authHeaders[C.HEADER_TOKEN].isNullOrBlank()) {
+                    val authUrl = try {
+                        xtraModule.playerRepository.loadStreamPlaylistUrl(
+                            context = this@ExoPlayerService,
+                            networkLibrary = C.OKHTTP,
+                            gqlHeaders = authHeaders,
+                            channelLogin = ch,
+                            platform = "web",
+                            playerType = "site",
+                            supportedCodecs = prefs().getString(C.TOKEN_SUPPORTED_CODECS, "av1,h265,h264"),
+                            proxyPlaybackAccessToken = false,
+                            proxyHost = null,
+                            proxyPort = null,
+                            proxyUser = null,
+                            proxyPassword = null,
+                            proxyTimeout = 2800,
+                            enableIntegrity = false
+                        )
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (!authUrl.isNullOrBlank()) {
+                        val rAuth = probeMaster(authUrl, false)
+                        if (rAuth != null && rAuth.third) {
+                            return@coroutineScope rAuth.first to false
+                        }
+                    }
+                }
+
+                val anyReachable = listOfNotNull(r0, r1, r2, r3).firstOrNull()
+                anyReachable?.let { it.first to it.second }
             }
         }
     }
@@ -1746,13 +1920,13 @@ class ExoPlayerService : BasePlaybackService() {
                                     startSecondaryPlayer(true)
                                 } else {
                                     stopProxy = true
-                                    serviceListener?.toast(R.string.stopping_proxy, Toast.LENGTH_SHORT)
-                                    stopSecondaryPlayer()
+                                    fallbackToHiddenAdShield()
                                 }
                             }
                             videoSwapActive -> {
                                 currentVideoSwapItem += 1
-                                if (videoSwapList?.getOrNull(currentVideoSwapItem) != null) {
+                                val totalCandidates = (videoSwapList?.size ?: 0) + TWIXY_DEFAULT_PROXIES.size
+                                if (currentVideoSwapItem < totalCandidates) {
                                     secondaryPlayerTimerJob?.cancel()
                                     secondaryPlayerTimerJob = lifecycleScope.launch {
                                         delay(3.minutes)
@@ -1764,8 +1938,7 @@ class ExoPlayerService : BasePlaybackService() {
                                     startSecondaryPlayer(false)
                                 } else {
                                     stopVideoSwap = true
-                                    serviceListener?.toast(R.string.stopping_video_swap, Toast.LENGTH_SHORT)
-                                    stopSecondaryPlayer()
+                                    fallbackToHiddenAdShield()
                                 }
                             }
                         }
@@ -1789,8 +1962,33 @@ class ExoPlayerService : BasePlaybackService() {
                 setSeekForwardIncrementMs((prefs().getString(C.PLAYER_FORWARD, "10")?.toLongOrNull() ?: 10) * 1000)
             }.build()
             player.addListener(playerListener)
+            val swapSize = videoSwapList?.size ?: 0
+            val fallbackProxy = if (!proxy && videoSwap == null && currentVideoSwapItem >= swapSize) {
+                TWIXY_DEFAULT_PROXIES.getOrNull(currentVideoSwapItem - swapSize)
+            } else null
             val url = if (streamProxy != null) {
                 quality?.url
+            } else if (fallbackProxy != null) {
+                val ch = channelLogin?.trim()?.lowercase()
+                val masterProxyUrl = if (!ch.isNullOrEmpty()) {
+                    fallbackProxy.url?.replace("\$channel", ch)?.let { base ->
+                        "$base?allow_source=true&allow_audio_only=true&fast_bread=true&supported_codecs=h264"
+                    }
+                } else null
+                if (masterProxyUrl != null) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            xtraModule.okHttpClient.value.newCall(Request.Builder().url(masterProxyUrl).build()).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body.string()
+                                    Regex("https?://\\S+\\.m3u8\\S*").find(body)?.value
+                                } else null
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                } else null
             } else {
                 if (videoSwap != null) {
                     val playlistUrl = channelLogin?.let { channelLogin ->
@@ -2103,13 +2301,7 @@ class ExoPlayerService : BasePlaybackService() {
                         )
                     ).apply {
                         setPlaylistParserFactory(CustomHlsPlaylistParserFactory())
-                        setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(
-                            if (proxy) {
-                                1
-                            } else {
-                                6
-                            }
-                        ))
+                        setLoadErrorHandlingPolicy(TwixyLoadErrorPolicy { proxy })
                     }.createMediaSource(
                         MediaItem.Builder().apply {
                             setUri(url.toUri())
@@ -2126,11 +2318,41 @@ class ExoPlayerService : BasePlaybackService() {
                 player.setPlaybackSpeed(1f)
                 player.prepare()
                 player.playWhenReady = true
+                secondaryPlayer?.release()
                 secondaryPlayer = player
                 serviceListener?.setPlayerSurface(true)
             } else {
-                stopSecondaryPlayer()
+                fallbackToHiddenAdShield()
             }
+        }
+    }
+
+    /**
+     * Se tutti i candidati VideoSwap + Proxy hanno temporaneamente pubblicità, NON riattivare MAI audio/video
+     * sul player principale finché `playingAds` è true: mantieni lo schermo/audio mutati (`hidden = true`) fino a fine spot!
+     */
+    private fun fallbackToHiddenAdShield() {
+        proxyMediaPlaylist = false
+        videoSwapActive = false
+        currentVideoSwapItem = 0
+        secondaryPlayerTimerJob?.cancel()
+        secondaryPlayerTimerJob = null
+        secondaryPlayer?.playWhenReady = false
+        serviceListener?.setPlayerSurface(false)
+        secondaryPlayer?.release()
+        secondaryPlayer = null
+        if (playingAds) {
+            hidden = true
+            player?.let { p ->
+                if (quality?.name != VideoQuality.AUDIO_ONLY_QUALITY) {
+                    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().apply {
+                        setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true)
+                    }.build()
+                }
+                p.volume = 0f
+            }
+        } else {
+            stopSecondaryPlayer2()
         }
     }
 
@@ -2882,6 +3104,29 @@ class ExoPlayerService : BasePlaybackService() {
         session?.release()
         bitmapLoadJob?.cancel()
         notificationManager?.cancel(NOTIFICATION_ID)
+    }
+
+    class TwixyLoadErrorPolicy(
+        private val isInitialProxyManifest: () -> Boolean
+    ) : DefaultLoadErrorHandlingPolicy(10) {
+        override fun getMinimumLoadableRetryCount(dataType: Int): Int {
+            if (dataType == androidx.media3.common.C.DATA_TYPE_MANIFEST && isInitialProxyManifest()) {
+                return 2
+            }
+            return 10
+        }
+
+        override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+            val errCount = loadErrorInfo.errorCount
+            if (loadErrorInfo.mediaLoadData.dataType == androidx.media3.common.C.DATA_TYPE_MEDIA) {
+                return when {
+                    errCount <= 3 -> 300L
+                    errCount <= 6 -> 650L
+                    else -> 1200L
+                }
+            }
+            return super.getRetryDelayMsFor(loadErrorInfo)
+        }
     }
 
     class CustomHlsPlaylistParserFactory: HlsPlaylistParserFactory {

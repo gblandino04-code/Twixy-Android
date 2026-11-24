@@ -892,6 +892,7 @@ class MainActivity : AppCompatActivity() {
             thumbnail = stream.thumbnail,
             createdAt = stream.createdAt,
             viewerCount = stream.viewerCount,
+            useCustomProxy = prefs.getBoolean(C.PLAYER_USE_CUSTOM_PROXY, true),
         ))
         val fragment = when (prefs.getString(C.PLAYER, C.EXOPLAYER)) {
             C.MEDIA_PLAYER -> MediaPlayerFragment()
@@ -1402,6 +1403,33 @@ class MainActivity : AppCompatActivity() {
                     putString(C.UI_THEME_DARK_ON, "3")
                 }
                 putInt(C.SETTINGS_VERSION, 18)
+            }
+        }
+        if (version < 19) {
+            viewModel.updateProxies(null)
+            viewModel.setDefaultVideoSwapItems()
+            prefs.edit {
+                putBoolean(C.PLAYER_USE_CUSTOM_PROXY, true)
+                putBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
+                putBoolean(C.PLAYER_HIDE_ADS, true)
+                putString(C.TOKEN_PLATFORM, "ps4")
+                putString(C.TOKEN_PLAYER_TYPE, "site")
+                if ((prefs.getString(C.PLAYER_BUFFER_MIN, "15000")?.toIntOrNull() ?: 15000) <= 15000) {
+                    putString(C.PLAYER_BUFFER_MIN, "20000")
+                }
+                if ((prefs.getString(C.PLAYER_BUFFER_MAX, "50000")?.toIntOrNull() ?: 50000) <= 50000) {
+                    putString(C.PLAYER_BUFFER_MAX, "60000")
+                }
+                if ((prefs.getString(C.PLAYER_BUFFER_PLAYBACK, "2000")?.toIntOrNull() ?: 2000) <= 2000) {
+                    putString(C.PLAYER_BUFFER_PLAYBACK, "2500")
+                }
+                if ((prefs.getString(C.PLAYER_BUFFER_REBUFFER, "2000")?.toIntOrNull() ?: 2000) <= 2000) {
+                    putString(C.PLAYER_BUFFER_REBUFFER, "3500")
+                }
+                if ((prefs.getString(C.PLAYER_LIVE_TARGET_OFFSET, "2000")?.toIntOrNull() ?: 2000) <= 2500) {
+                    putString(C.PLAYER_LIVE_TARGET_OFFSET, "4500")
+                }
+                putInt(C.SETTINGS_VERSION, 19)
             }
         }
     }

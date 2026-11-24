@@ -22,21 +22,121 @@ import com.github.andreyasadchy.xtra.repository.PlayerRepository
 import com.github.andreyasadchy.xtra.repository.RecentSearchesRepository
 import com.github.andreyasadchy.xtra.repository.SavedFiltersRepository
 import kotlinx.serialization.json.Json
+import okhttp3.ConnectionPool
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
 import org.chromium.net.QuicOptions
 import org.chromium.net.RequestFinishedInfo
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.URL
+import java.net.URLEncoder
+import java.net.UnknownHostException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
 
 class XtraModule(application: Application) {
+
+    /**
+     * Cache DNS in-memory + retry rapido + fallback DoH HTTPS (1.1.1.1 / 8.8.8.8 su IP diretto)
+     * per evitare errori `UnknownHostException` e stalli UDP da 3-5s in presenza di packet loss.
+     */
+    private val resilientDns = object : Dns {
+        private val cache = ConcurrentHashMap<String, Pair<Long, List<InetAddress>>>()
+        private val ttlMs = 10 * 60 * 1000L
+
+        private fun resolveViaDoh(hostname: String): List<InetAddress> {
+            val encoded = try { URLEncoder.encode(hostname, "UTF-8") } catch (_: Exception) { hostname }
+            val endpoints = listOf(
+                "https://1.1.1.1/dns-query?name=$encoded&type=A" to "cloudflare-dns.com",
+                "https://8.8.8.8/resolve?name=$encoded&type=A" to "dns.google"
+            )
+            for ((urlStr, hostHdr) in endpoints) {
+                var conn: HttpsURLConnection? = null
+                try {
+                    conn = (URL(urlStr).openConnection() as HttpsURLConnection).apply {
+                        connectTimeout = 2000
+                        readTimeout = 2000
+                        setRequestProperty("Accept", "application/dns-json")
+                        setRequestProperty("Host", hostHdr)
+                        setHostnameVerifier { _, _ -> true }
+                    }
+                    if (conn.responseCode in 200..299) {
+                        val body = conn.inputStream.bufferedReader().use { it.readText() }
+                        val arr = JSONObject(body).optJSONArray("Answer") ?: continue
+                        val out = mutableListOf<InetAddress>()
+                        for (i in 0 until arr.length()) {
+                            val obj = arr.optJSONObject(i) ?: continue
+                            if (obj.optInt("type") == 1) {
+                                val ip = obj.optString("data").trim()
+                                if (ip.isNotEmpty()) {
+                                    out.add(InetAddress.getByName(ip))
+                                }
+                            }
+                        }
+                        if (out.isNotEmpty()) return out
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    try { conn?.disconnect() } catch (_: Exception) {}
+                }
+            }
+            return emptyList()
+        }
+
+        override fun lookup(hostname: String): List<InetAddress> {
+            val key = hostname.trim().lowercase()
+            val now = System.currentTimeMillis()
+            val cached = cache[key]
+            if (cached != null && now < cached.first && cached.second.isNotEmpty()) {
+                return cached.second
+            }
+            var lastErr: UnknownHostException? = null
+            for (attempt in 0..1) {
+                try {
+                    val resolved = Dns.SYSTEM.lookup(hostname)
+                    if (resolved.isNotEmpty()) {
+                        if (cache.size > 256) cache.clear()
+                        cache[key] = (now + ttlMs) to resolved
+                        return resolved
+                    }
+                } catch (e: UnknownHostException) {
+                    lastErr = e
+                    if (attempt == 0) {
+                        try { Thread.sleep(40) } catch (_: Exception) {}
+                    }
+                }
+            }
+            if (cached != null && cached.second.isNotEmpty()) {
+                return cached.second
+            }
+            val dohResolved = resolveViaDoh(hostname)
+            if (dohResolved.isNotEmpty()) {
+                cache[key] = (now + ttlMs) to dohResolved
+                return dohResolved
+            }
+            throw lastErr ?: UnknownHostException("Unable to resolve $hostname")
+        }
+    }
 
     val httpEngine = lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 7) {
             HttpEngine.Builder(application).apply {
+                setEnableQuic(true)
+                setEnableHttp2(true)
+                setEnableHttpCache(HttpEngine.Builder.HTTP_CACHE_IN_MEMORY, 2L * 1024L * 1024L)
                 addQuicHint("gql.twitch.tv", 443, 443)
                 addQuicHint("www.twitch.tv", 443, 443)
+                addQuicHint("usher.ttvnw.net", 443, 443)
+                addQuicHint("eu.luminous.dev", 443, 443)
+                addQuicHint("eu2.luminous.dev", 443, 443)
+                addQuicHint("as.luminous.dev", 443, 443)
                 addQuicHint("7tv.io", 443, 443)
                 addQuicHint("cdn.7tv.app", 443, 443)
                 addQuicHint("api.betterttv.net", 443, 443)
@@ -51,10 +151,17 @@ class XtraModule(application: Application) {
             CronetEngine.Builder(application).apply {
                 val userAgent = "Cronet/" + defaultUserAgent.substringAfter("Cronet/", "").substringBefore(')')
                 setUserAgent(userAgent)
+                enableQuic(true)
+                enableHttp2(true)
+                enableHttpCache(CronetEngine.Builder.HTTP_CACHE_IN_MEMORY, 2L * 1024L * 1024L)
                 @QuicOptions.Experimental
                 setQuicOptions(QuicOptions.builder().setHandshakeUserAgent(userAgent).build())
                 addQuicHint("gql.twitch.tv", 443, 443)
                 addQuicHint("www.twitch.tv", 443, 443)
+                addQuicHint("usher.ttvnw.net", 443, 443)
+                addQuicHint("eu.luminous.dev", 443, 443)
+                addQuicHint("eu2.luminous.dev", 443, 443)
+                addQuicHint("as.luminous.dev", 443, 443)
                 addQuicHint("7tv.io", 443, 443)
                 addQuicHint("cdn.7tv.app", 443, 443)
                 addQuicHint("api.betterttv.net", 443, 443)
@@ -83,6 +190,12 @@ class XtraModule(application: Application) {
 
     val okHttpClient = lazy {
         OkHttpClient.Builder().apply {
+            dns(resilientDns)
+            retryOnConnectionFailure(true)
+            connectTimeout(6, TimeUnit.SECONDS)
+            readTimeout(8, TimeUnit.SECONDS)
+            writeTimeout(8, TimeUnit.SECONDS)
+            connectionPool(ConnectionPool(24, 3, TimeUnit.MINUTES))
             if (BuildConfig.DEBUG) {
                 addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
             }

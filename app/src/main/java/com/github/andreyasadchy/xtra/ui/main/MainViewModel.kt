@@ -1190,23 +1190,16 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             playerRepository.saveCustomProxies(
                 listOf(
-                    Pair("eu.luminous.dev/live/\$channel", true),
-                    Pair("eu2.luminous.dev/live/\$channel", true),
-                    Pair("eu3.luminous.dev/live/\$channel", true),
-                    Pair("as.luminous.dev/live/\$channel", true),
-                    Pair("lb-eu.cdn-perfprod.com/live/\$channel", true),
-                    Pair("lb-eu2.cdn-perfprod.com/live/\$channel", true),
-                    Pair("lb-eu3.cdn-perfprod.com/live/\$channel", true),
-                    Pair("lb-eu4.cdn-perfprod.com/live/\$channel", true),
-                    Pair("lb-eu5.cdn-perfprod.com/live/\$channel", true),
-                    Pair("lb-na.cdn-perfprod.com/live/\$channel", false),
-                    Pair("lb-sa.cdn-perfprod.com/live/\$channel", false),
-                    Pair("lb-as.cdn-perfprod.com/live/\$channel", false),
+                    Pair("https://eu.luminous.dev/live/\$channel", true),
+                    Pair("https://eu2.luminous.dev/live/\$channel", true),
+                    Pair("https://as.luminous.dev/live/\$channel", true),
                 ).let { list ->
                     if (!oldProxy.isNullOrBlank() &&
                         oldProxy.toUri().host != "api.ttv.lol" &&
+                        !oldProxy.contains("cdn-perfprod.com") &&
+                        !oldProxy.contains("eu3.luminous.dev") &&
                         oldProxy.substringAfter("://").substringBefore('?').let { url ->
-                            list.find { it.first == url } == null
+                            list.find { it.first.substringAfter("://") == url } == null
                         }
                     ) {
                         listOf(Pair(oldProxy, true)) + list
@@ -1256,9 +1249,10 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             playerRepository.saveVideoSwapItems(
                 listOf(
+                    Triple("ps4", "site", true),
+                    Triple("web", "popout", true),
+                    Triple("web", "embed", true),
                     Triple("android", "autoplay", true),
-                    Triple("web", "embed", false),
-                    Triple("web", "popout", false),
                 ).mapIndexed { index, triple ->
                     VideoSwap(triple.first, triple.second, index, triple.third)
                 }

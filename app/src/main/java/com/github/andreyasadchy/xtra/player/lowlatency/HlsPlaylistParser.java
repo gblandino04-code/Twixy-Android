@@ -1644,7 +1644,7 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
             new Segment(
                 segmentUri,
                 initializationSegment != null ? initializationSegment : inferredInitSegment,
-                segmentTitle,
+                isAdSegment ? ("stitched-ad|" + (segmentTitle != null ? segmentTitle : "")) : segmentTitle,
                 segmentDurationUs,
                 relativeDiscontinuitySequence,
                 segmentStartTimeUs,
