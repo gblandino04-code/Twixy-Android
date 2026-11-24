@@ -255,15 +255,20 @@ class ExoPlayerService : BasePlaybackService() {
                     }
                     if (type == STREAM) {
                         val useProxy = useStreamProxy && !stopProxy && streamProxyList?.getOrNull(currentStreamProxy)?.proxyMediaPlaylist == true
-                        val useVideoSwap = useVideoSwap && !stopVideoSwap
-                        val hideAds = prefs().getBoolean(C.PLAYER_HIDE_ADS, false)
-                        if (useProxy || useVideoSwap || hideAds) {
+                        val canVideoSwap = useVideoSwap && !stopVideoSwap
+                        val hideAds = prefs().getBoolean(C.PLAYER_HIDE_ADS, true)
+                        if (useProxy || canVideoSwap || hideAds) {
                             val playlist = (player?.currentManifest as? HlsManifest)?.mediaPlaylist
                             val ads = checkPlaylist(playlist)
                             val oldValue = playingAds
                             playingAds = ads
                             if (ads) {
+                                // Annulla subito eventuali timer di ripristino da un ad-pod precedente (evita che riattivi il player durante un 2° mini-spot!)
+                                adDelayJob?.cancel()
+                                adDelayJob = null
                                 if (!oldValue) {
+                                    stopVideoSwap = false
+                                    currentVideoSwapItem = 0
                                     when {
                                         useProxy -> {
                                             if (!proxyMediaPlaylist) {
@@ -288,7 +293,7 @@ class ExoPlayerService : BasePlaybackService() {
                                                 startSecondaryPlayer(true)
                                             }
                                         }
-                                        useVideoSwap -> {
+                                        canVideoSwap -> {
                                             if (!videoSwapActive) {
                                                 videoSwapActive = true
                                                 serviceListener?.toast(R.string.starting_video_swap, Toast.LENGTH_SHORT)
@@ -774,7 +779,9 @@ class ExoPlayerService : BasePlaybackService() {
                                     && (it.proxyPlaybackAccessToken || it.proxyMultivariantPlaylist || it.proxyMediaPlaylist)
                         }.sortedBy { it.position }
                     }
-                    useVideoSwap = !useCustomProxy && !useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
+                    // Mantieni VideoSwap SEMPRE attivo anche quando useCustomProxy (Luminous) è attivo:
+                    // se un proxy fa passare anche 1 sola mini-pubblicità, VideoSwap interviene istantaneamente!
+                    useVideoSwap = !useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
                     if (useVideoSwap) {
                         videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
                             it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
@@ -950,18 +957,18 @@ class ExoPlayerService : BasePlaybackService() {
                         }
                     }
                 } else null
+                if (!useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)) {
+                    useVideoSwap = true
+                    if (videoSwapList.isNullOrEmpty()) {
+                        videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
+                            it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
+                        }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_VIDEO_SWAPS }
+                    }
+                }
                 if (proxyUrl != null) {
                     playlistUrl = proxyUrl
                 } else {
                     useCustomProxy = false
-                    if (!useStreamProxy && prefs().getBoolean(C.PLAYER_USE_VIDEO_SWAP, true)) {
-                        useVideoSwap = true
-                        if (videoSwapList.isNullOrEmpty()) {
-                            videoSwapList = xtraModule.playerRepository.getVideoSwapItems().filter {
-                                it.enabled && !it.platform.isNullOrBlank() && !it.playerType.isNullOrBlank()
-                            }.sortedBy { it.position }.ifEmpty { TWIXY_DEFAULT_VIDEO_SWAPS }
-                        }
-                    }
                     val url = if (streamProxy?.proxyPlaybackAccessToken == true) {
                         var url: String?
                         while (true) {
@@ -1658,32 +1665,56 @@ class ExoPlayerService : BasePlaybackService() {
         }
     }
 
+    private fun isAdSegmentTitleOrUrl(rawTitle: String?, rawUrl: String?): Boolean {
+        val fullTitle = (rawTitle ?: "").trim().lowercase()
+        val prefix = fullTitle.substringBefore('|').trim()
+        val urlLow = (rawUrl ?: "").lowercase()
+        return prefix in setOf("amazon", "adform", "dcm", "ad", "preroll", "midroll", "commercial")
+            || prefix.contains("amazon")
+            || fullTitle.contains("stitched-ad")
+            || fullTitle.contains("|ad|")
+            || fullTitle.contains("adbreak")
+            || urlLow.contains("stitched-ad")
+            || urlLow.contains("amazon-adsystem")
+            || urlLow.contains("/ads/")
+    }
+
     private fun checkPlaylist(playlist: HlsMediaPlaylist?): Boolean {
-        return playlist?.segments?.lastOrNull()?.let { segment ->
-            val title = segment.title.substringBefore('|').trim().lowercase()
-            if (title in setOf("amazon", "adform", "dcm", "ad", "preroll", "midroll")
-                || title.contains("amazon")
-                || segment.title.contains("stitched-ad", ignoreCase = true)
-            ) {
-                true
-            } else {
-                val segmentStartTime = playlist.startTimeUs + segment.relativeStartTimeUs
-                playlist.interstitials.find { dateRange ->
-                    if (dateRange.id.startsWith("stitched-ad-")
-                        || dateRange.clientDefinedAttributes.find { it.name == "CLASS" }?.textValue == "twitch-stitched-ad"
-                        || dateRange.clientDefinedAttributes.find { it.name.startsWith("X-TV-TWITCH-AD-") } != null
-                    ) {
-                        val startTime = dateRange.startDateUnixUs
-                        val endTime = dateRange.endDateUnixUs.takeIf { it != androidx.media3.common.C.TIME_UNSET }
-                            ?: dateRange.durationUs.takeIf { it != androidx.media3.common.C.TIME_UNSET }?.let { startTime + it }
-                            ?: dateRange.plannedDurationUs.takeIf { it != androidx.media3.common.C.TIME_UNSET }?.let { startTime + it }
-                        if (endTime != null) {
-                            segmentStartTime in startTime..<endTime
-                        } else false
-                    } else false
-                } != null
+        if (playlist == null || playlist.segments.isEmpty()) return false
+        val playheadUs = ((player?.currentPosition ?: 0L).coerceAtLeast(0L)) * 1000L
+        val adRanges = playlist.interstitials.mapNotNull { dateRange ->
+            val cls = dateRange.clientDefinedAttributes.find { it.name == "CLASS" }?.textValue ?: ""
+            val isAdRange = dateRange.id.startsWith("stitched-ad-", ignoreCase = true)
+                || cls.contains("stitched-ad", ignoreCase = true)
+                || cls.contains("twitch-ad", ignoreCase = true)
+                || dateRange.clientDefinedAttributes.any { it.name.startsWith("X-TV-TWITCH-AD-", ignoreCase = true) }
+            if (isAdRange && dateRange.startDateUnixUs != androidx.media3.common.C.TIME_UNSET) {
+                val startTime = dateRange.startDateUnixUs
+                val endTime = dateRange.endDateUnixUs.takeIf { it != androidx.media3.common.C.TIME_UNSET }
+                    ?: dateRange.durationUs.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 }?.let { startTime + it }
+                    ?: dateRange.plannedDurationUs.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 }?.let { startTime + it }
+                    ?: (startTime + 30_000_000L)
+                startTime to endTime
+            } else null
+        }
+
+        // Controlla TUTTI i segmenti attuali e imminenti (non solo lastOrNull, che nei flussi LL-HLS è un prefetch con title vuoto!)
+        val relevantSegments = playlist.segments.filter { seg ->
+            (seg.relativeStartTimeUs + seg.durationUs) >= (playheadUs - 1_500_000L)
+        }.ifEmpty { playlist.segments.takeLast(6) }
+
+        for (seg in relevantSegments) {
+            if (isAdSegmentTitleOrUrl(seg.title, seg.url)) {
+                return true
             }
-        } == true
+            if (adRanges.isNotEmpty() && !seg.title.startsWith("live", ignoreCase = true)) {
+                val segAbsStart = playlist.startTimeUs + seg.relativeStartTimeUs
+                if (adRanges.any { (startUs, endUs) -> segAbsStart in startUs..<endUs }) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private fun startSecondaryPlayer(proxy: Boolean) {
@@ -2106,6 +2137,8 @@ class ExoPlayerService : BasePlaybackService() {
     private fun stopSecondaryPlayer() {
         proxyMediaPlaylist = false
         videoSwapActive = false
+        stopVideoSwap = false
+        currentVideoSwapItem = 0
         secondaryPlayerTimerJob?.cancel()
         secondaryPlayerTimerJob = null
         stopSecondaryPlayer2()

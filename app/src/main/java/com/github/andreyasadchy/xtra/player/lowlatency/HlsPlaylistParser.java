@@ -995,6 +995,9 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
     HashMap<String, String> variableDefinitions = new HashMap<>();
     HashMap<String, Segment> urlToInferredInitSegment = new HashMap<>();
     List<Segment> segments = new ArrayList<>();
+    List<Boolean> segmentAdFlags = new ArrayList<>();
+    List<Boolean> segmentPrefetchFlags = new ArrayList<>();
+    boolean inTwitchAdDateRange = false;
     List<Part> trailingParts = new ArrayList<>();
     @Nullable Part preloadPart = null;
     List<RenditionReport> renditionReports = new ArrayList<>();
@@ -1162,6 +1165,8 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
             segment = segment.copyWith(segmentStartTimeUs, newRelativeDiscontinuitySequence);
           }
           segments.add(segment);
+          segmentAdFlags.add(false);
+          segmentPrefetchFlags.add(false);
           segmentStartTimeUs += segment.durationUs;
           partStartTimeUs = segmentStartTimeUs;
           if (segment.byteRangeLength != C.LENGTH_UNSET) {
@@ -1348,6 +1353,15 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
       } else if (line.startsWith(TAG_DATERANGE)) { // xtra: ad segments
         String className = parseOptionalStringAttr(line, REGEX_CLASS, /* defaultValue= */ "", variableDefinitions, matcherCache);
         String id = parseStringAttr(line, REGEX_ID, variableDefinitions, matcherCache);
+        String lineLower = line.toLowerCase();
+        if (id.toLowerCase().startsWith("stitched-ad")
+            || className.toLowerCase().contains("stitched-ad")
+            || className.toLowerCase().contains("twitch-ad")
+            || lineLower.contains("x-tv-twitch-ad-")) {
+          inTwitchAdDateRange = true;
+        } else if (className.toLowerCase().contains("twitch-stream") || lineLower.contains("twitch-live")) {
+          inTwitchAdDateRange = false;
+        }
         @Nullable Uri assetUri = null;
         String assetUriString =
             parseOptionalStringAttr(line, REGEX_ASSET_URI, variableDefinitions, matcherCache);
@@ -1563,17 +1577,41 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
                 .setSkipControlLabelId(skipControlLabelId);
         interstitialBuilderMap.put(id, interstitialBuilder);
       } else if (!line.startsWith("#") || line.startsWith("#EXT-X-TWITCH-PREFETCH")) { // xtra: low latency
+        boolean isPrefetchLine = line.startsWith("#EXT-X-TWITCH-PREFETCH");
         @Nullable
         String segmentEncryptionIV =
             getSegmentEncryptionIV(
                 segmentMediaSequence, fullSegmentEncryptionKeyUri, fullSegmentEncryptionIV);
         segmentMediaSequence++;
-        if (line.startsWith("#EXT-X-TWITCH-PREFETCH")) { // xtra: low latency
+        if (isPrefetchLine) { // xtra: low latency
           segmentDurationUs = 2 * C.MICROS_PER_SECOND;
           line = line.substring(line.indexOf(':') + 1);
         }
         String segmentUri = replaceVariableReferences(line, variableDefinitions, matcherCache)
                 .replace("-unmuted", "-muted"); // xtra: unmuted segments
+        String titleLow = segmentTitle != null ? segmentTitle.trim().toLowerCase() : "";
+        int pipeIdx = titleLow.indexOf('|');
+        String titlePrefix = (pipeIdx >= 0 ? titleLow.substring(0, pipeIdx) : titleLow).trim();
+        String uriLow = segmentUri.toLowerCase();
+        if ("live".equals(titlePrefix)) {
+          inTwitchAdDateRange = false;
+        }
+        boolean isAdSegment =
+            titlePrefix.equals("amazon")
+                || titlePrefix.equals("adform")
+                || titlePrefix.equals("dcm")
+                || titlePrefix.equals("ad")
+                || titlePrefix.equals("preroll")
+                || titlePrefix.equals("midroll")
+                || titlePrefix.equals("commercial")
+                || titlePrefix.contains("amazon")
+                || titleLow.contains("stitched-ad")
+                || titleLow.contains("|ad|")
+                || titleLow.contains("adbreak")
+                || uriLow.contains("stitched-ad")
+                || uriLow.contains("amazon-adsystem")
+                || uriLow.contains("/ads/")
+                || (inTwitchAdDateRange && !"live".equals(titlePrefix));
         @Nullable Segment inferredInitSegment = urlToInferredInitSegment.get(segmentUri);
         if (segmentByteRangeLength == C.LENGTH_UNSET) {
           // The segment has no byte range defined.
@@ -1617,6 +1655,8 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
                 segmentByteRangeLength,
                 hasGapTag,
                 trailingParts));
+        segmentAdFlags.add(isAdSegment);
+        segmentPrefetchFlags.add(isPrefetchLine);
         segmentStartTimeUs += segmentDurationUs;
         partStartTimeUs = segmentStartTimeUs;
         segmentDurationUs = 0;
@@ -1650,6 +1690,54 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
 
     if (preloadPart != null) {
       trailingParts.add(preloadPart);
+    }
+
+    // Twixy Anti-Ad Surgeon: se nella playlist ci sono sia segmenti live puliti sia 1+ segmenti pubblicitari brevi/residui,
+    // rimuovi direttamente i segmenti ad mantenendo solo i segmenti live (zero spot brevi!).
+    // Se invece TUTTA la finestra è solo pubblicità (0 segmenti live), lasciali così ExoPlayerService attiva subito VideoSwap!
+    if (segmentAdFlags.size() == segments.size() && !segments.isEmpty()) {
+      int adCount = 0;
+      int cleanLiveCount = 0;
+      for (int i = 0; i < segments.size(); i++) {
+        boolean isAd = segmentAdFlags.get(i);
+        boolean isPf = segmentPrefetchFlags.get(i);
+        if (isAd) {
+          adCount++;
+        } else if (!isPf) {
+          cleanLiveCount++;
+        }
+      }
+      if (adCount > 0 && cleanLiveCount >= 1) {
+        List<Segment> filteredSegments = new ArrayList<>(segments.size() - adCount);
+        long runningStartUs = 0;
+        int discBump = 0;
+        boolean skippedPrev = false;
+        boolean stillAtHead = true;
+        long headDropped = 0;
+        for (int i = 0; i < segments.size(); i++) {
+          if (segmentAdFlags.get(i)) {
+            if (stillAtHead) {
+              headDropped++;
+            } else {
+              skippedPrev = true;
+            }
+            continue;
+          }
+          stillAtHead = false;
+          if (skippedPrev) {
+            discBump++;
+            skippedPrev = false;
+          }
+          Segment origSeg = segments.get(i);
+          Segment rebuiltSeg =
+              origSeg.copyWith(runningStartUs, origSeg.relativeDiscontinuitySequence + discBump);
+          filteredSegments.add(rebuiltSeg);
+          runningStartUs += origSeg.durationUs;
+        }
+        segments = filteredSegments;
+        mediaSequence += headDropped;
+        interstitialBuilderMap.clear();
+      }
     }
 
     List<Interstitial> interstitials = new ArrayList<>();
