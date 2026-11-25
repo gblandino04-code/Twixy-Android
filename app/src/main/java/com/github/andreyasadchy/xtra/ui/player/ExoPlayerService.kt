@@ -92,6 +92,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Credentials
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
 import org.chromium.net.QuicOptions
@@ -289,6 +291,11 @@ class ExoPlayerService : BasePlaybackService() {
                                                 secondaryPlayerTimerJob?.cancel()
                                                 secondaryPlayerTimerJob = lifecycleScope.launch {
                                                     delay(3.minutes)
+                                                    var extraChecks = 0
+                                                    while (playingAds && extraChecks < 28) {
+                                                        delay(15_000.milliseconds)
+                                                        extraChecks += 1
+                                                    }
                                                     proxyMediaPlaylist = false
                                                     serviceListener?.toast(R.string.stopping_proxy, Toast.LENGTH_SHORT)
                                                     stopSecondaryPlayer2()
@@ -312,6 +319,11 @@ class ExoPlayerService : BasePlaybackService() {
                                                 secondaryPlayerTimerJob?.cancel()
                                                 secondaryPlayerTimerJob = lifecycleScope.launch {
                                                     delay(3.minutes)
+                                                    var extraChecks = 0
+                                                    while (playingAds && extraChecks < 28) {
+                                                        delay(15_000.milliseconds)
+                                                        extraChecks += 1
+                                                    }
                                                     videoSwapActive = false
                                                     serviceListener?.toast(R.string.stopping_video_swap, Toast.LENGTH_SHORT)
                                                     stopSecondaryPlayer2()
@@ -1240,12 +1252,14 @@ class ExoPlayerService : BasePlaybackService() {
                             )
                         }.createMediaSource(
                             MediaItem.Builder().apply {
+                                val isCfLiveEdge = url.startsWith("data:") || url.contains("twixy_live_edge=1")
                                 setUri(url.toUri())
                                 setMimeType(MimeTypes.APPLICATION_M3U8)
                                 setLiveConfiguration(MediaItem.LiveConfiguration.Builder().apply {
                                     prefs().getString(C.PLAYER_LIVE_MIN_SPEED, "")?.toFloatOrNull()?.let { setMinPlaybackSpeed(it) }
                                     prefs().getString(C.PLAYER_LIVE_MAX_SPEED, "")?.toFloatOrNull()?.let { setMaxPlaybackSpeed(it) }
-                                    prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "4500")?.toLongOrNull()?.let { setTargetOffsetMs(it) }
+                                    val userTargetOff = prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "4500")?.toLongOrNull() ?: 4500L
+                                    setTargetOffsetMs(if (isCfLiveEdge) userTargetOff.coerceAtLeast(11_000L) else userTargetOff)
                                 }.build())
                             }.build()
                         )
@@ -1285,7 +1299,145 @@ class ExoPlayerService : BasePlaybackService() {
     }
 
     /**
-     * Pre-flight parallelo anti-pre-roll e anti-packet-loss (stile Twixy PC):
+     * Risolve lo stream CloudFront Live-Edge 1080p60 (`index-dvr.m3u8?twixy_live_edge=1`, ~2.5s dalla diretta,
+     * 0% pre-roll e 0% mid-roll per tutta la trasmissione) per canali su Amazon IVS (es. Tumblurr) dove tutti i token
+     * e i proxy ricevono pubblicità cucite lato server.
+     */
+    private suspend fun resolveCloudFrontLiveEdgePlaylistUri(
+        channelLogin: String,
+        singleVariantForSecondary: Boolean = false
+    ): String? = withContext(Dispatchers.IO) {
+        val ch = channelLogin.trim().lowercase()
+        if (ch.isEmpty()) return@withContext null
+        try {
+            val client = xtraModule.okHttpClient.value.newBuilder()
+                .connectTimeout(2500, TimeUnit.MILLISECONDS)
+                .readTimeout(3200, TimeUnit.MILLISECONDS)
+                .build()
+            val gqlPayload = JSONObject().apply {
+                put(
+                    "query",
+                    "query(\$login:String!){user(login:\$login){stream{id createdAt}videos(first:1,type:ARCHIVE,sort:TIME){edges{node{id createdAt seekPreviewsURL broadcastType}}}}}"
+                )
+                put("variables", JSONObject().put("login", ch))
+            }.toString()
+            val gqlReq = Request.Builder()
+                .url("https://gql.twitch.tv/gql")
+                .header(C.HEADER_CLIENT_ID, "kimne78kx3ncx6brgo4mv6wki5h1ko")
+                .header("Content-Type", "application/json")
+                .post(gqlPayload.toRequestBody())
+                .build()
+            val gqlBody = client.newCall(gqlReq).execute().use { resp ->
+                if (resp.isSuccessful) resp.body.string() else null
+            } ?: return@withContext null
+
+            val userObj = JSONObject(gqlBody).optJSONObject("data")?.optJSONObject("user") ?: return@withContext null
+            val streamObj = userObj.optJSONObject("stream") ?: return@withContext null
+            val edges = userObj.optJSONObject("videos")?.optJSONArray("edges") ?: return@withContext null
+            if (edges.length() == 0) return@withContext null
+            val node = edges.optJSONObject(0)?.optJSONObject("node") ?: return@withContext null
+            if (!node.optString("broadcastType", "ARCHIVE").equals("ARCHIVE", ignoreCase = true)) {
+                return@withContext null
+            }
+            val seekUrl = node.optString("seekPreviewsURL", "").trim()
+            if (seekUrl.isEmpty()) return@withContext null
+
+            val streamIdStr = streamObj.optString("id", "").trim()
+            val stCreatedMs = try { Util.parseXsDateTime(streamObj.optString("createdAt", "")) } catch (_: Exception) { 0L }
+            val vdCreatedMs = try { Util.parseXsDateTime(node.optString("createdAt", "")) } catch (_: Exception) { 0L }
+            val idMatches = streamIdStr.isNotEmpty() && seekUrl.contains("_${streamIdStr}_")
+            val tsMatches = stCreatedMs > 0L && vdCreatedMs > 0L && kotlin.math.abs(vdCreatedMs - stCreatedMs) <= 900_000L
+            if (!idMatches && !tsMatches) return@withContext null
+
+            val parsedSeek = seekUrl.toUri()
+            val firstSeg = parsedSeek.pathSegments.firstOrNull()?.takeIf { it.isNotBlank() } ?: return@withContext null
+            val scheme = parsedSeek.scheme ?: "https"
+            val host = parsedSeek.host ?: return@withContext null
+            val baseCfUrl = "$scheme://$host/$firstSeg"
+            val chunkedLiveUrl = "$baseCfUrl/chunked/index-dvr.m3u8?twixy_live_edge=1"
+
+            val srcManifest = client.newCall(
+                Request.Builder().url(chunkedLiveUrl).header("Cache-Control", "no-cache").build()
+            ).execute().use { resp ->
+                if (resp.isSuccessful) resp.body.string() else null
+            } ?: return@withContext null
+            if (!srcManifest.contains("#EXTM3U") || !srcManifest.contains("#EXTINF:") || srcManifest.contains("#EXT-X-ENDLIST")) {
+                return@withContext null
+            }
+
+            if (singleVariantForSecondary) {
+                val targetRes = quality?.resolution
+                if (quality?.name == VideoQuality.AUDIO_ONLY_QUALITY) {
+                    val audioUrl = "$baseCfUrl/audio_only/index-dvr.m3u8?twixy_live_edge=1"
+                    val okAudio = try {
+                        client.newCall(Request.Builder().url(audioUrl).head().build()).execute().use { it.isSuccessful }
+                    } catch (_: Exception) { false }
+                    if (okAudio) return@withContext audioUrl
+                } else if (targetRes != null && targetRes in 140..900) {
+                    val folder = when {
+                        targetRes >= 720 -> "720p60"
+                        targetRes >= 480 -> "480p30"
+                        targetRes >= 360 -> "360p30"
+                        else -> "160p30"
+                    }
+                    val candUrl = "$baseCfUrl/$folder/index-dvr.m3u8?twixy_live_edge=1"
+                    val okCand = try {
+                        client.newCall(Request.Builder().url(candUrl).head().build()).execute().use { it.isSuccessful }
+                    } catch (_: Exception) { false }
+                    if (okCand) return@withContext candUrl
+                }
+                return@withContext chunkedLiveUrl
+            }
+
+            data class CfVariantSpec(
+                val folder: String,
+                val stableId: String,
+                val bandwidth: Int,
+                val resolution: String?,
+                val fps: String?,
+                val codecs: String
+            )
+
+            val extraSpecs = listOf(
+                CfVariantSpec("720p60", "720p60", 3_400_000, "1280x720", "60.000", "avc1.640020,mp4a.40.2"),
+                CfVariantSpec("720p30", "720p30", 2_300_000, "1280x720", "30.000", "avc1.4D401F,mp4a.40.2"),
+                CfVariantSpec("480p30", "480p30", 1_400_000, "852x480", "30.000", "avc1.4D401F,mp4a.40.2"),
+                CfVariantSpec("360p30", "360p30", 800_000, "640x360", "30.000", "avc1.4D401E,mp4a.40.2"),
+                CfVariantSpec("160p30", "160p30", 300_000, "284x160", "30.000", "avc1.4D400C,mp4a.40.2"),
+                CfVariantSpec("audio_only", "audio_only", 160_000, null, null, "mp4a.40.2"),
+            )
+            val availableExtras = coroutineScope {
+                extraSpecs.map { spec ->
+                    async {
+                        val u = "$baseCfUrl/${spec.folder}/index-dvr.m3u8?twixy_live_edge=1"
+                        val ok = try {
+                            client.newCall(Request.Builder().url(u).head().build()).execute().use { it.isSuccessful }
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (ok) spec to u else null
+                    }
+                }.mapNotNull { it.await() }
+            }
+
+            val sb = StringBuilder()
+            sb.append("#EXTM3U\n")
+            sb.append("#EXT-X-INDEPENDENT-SEGMENTS\n")
+            sb.append("#EXT-X-STREAM-INF:BANDWIDTH=7600000,RESOLUTION=1920x1080,FRAME-RATE=60.000,CODECS=\"avc1.64002A,mp4a.40.2\",STABLE-VARIANT-ID=\"source\"\n")
+            sb.append(chunkedLiveUrl).append('\n')
+            for ((spec, u) in availableExtras) {
+                sb.append("#EXT-X-STREAM-INF:BANDWIDTH=").append(spec.bandwidth)
+                if (spec.resolution != null) sb.append(",RESOLUTION=").append(spec.resolution)
+                if (spec.fps != null) sb.append(",FRAME-RATE=").append(spec.fps)
+                sb.append(",CODECS=\"").append(spec.codecs).append("\",STABLE-VARIANT-ID=\"").append(spec.stableId).append("\"\n")
+                sb.append(u).append('\n')
+            }
+            val encoded = Base64.encodeToString(sb.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+            "data:application/vnd.apple.mpegurl;base64,$encoded"
+        } catch (_: Exception) {
+            null
+        }
+    }
      * prima che ExoPlayer apra lo stream a t=0s, verifica in parallelo Luminous EU / EU2 / PS4 / AS
      * e restituisce la prima playlist 1080p60 con 0 segmenti pubblicitari!
      */
@@ -1323,7 +1475,7 @@ class ExoPlayerService : BasePlaybackService() {
             }
         }
 
-        return withTimeoutOrNull(4200L) {
+        return withTimeoutOrNull(7500L) {
             coroutineScope {
                 val lumEu = primaryProxyUrl ?: "https://eu.luminous.dev/live/$ch?$qs"
                 val lumEu2 = "https://eu2.luminous.dev/live/$ch?$qs"
@@ -1366,18 +1518,21 @@ class ExoPlayerService : BasePlaybackService() {
                     d1.cancel(); d2.cancel(); d3.cancel()
                     return@coroutineScope r0.first to r0.second
                 }
+                // Il candidato primario ha un pre-roll cucito (es. Tumblurr IVS): pre-risolvi già in parallelo CloudFront Live-Edge!
+                val dCf = async { resolveCloudFrontLiveEdgePlaylistUri(ch, singleVariantForSecondary = false) }
                 val r1 = d1.await()
                 if (r1 != null && r1.third) {
-                    d2.cancel(); d3.cancel()
+                    d2.cancel(); d3.cancel(); dCf.cancel()
                     return@coroutineScope r1.first to r1.second
                 }
                 val r2 = d2.await()
                 if (r2 != null && r2.third) {
-                    d3.cancel()
+                    d3.cancel(); dCf.cancel()
                     return@coroutineScope r2.first to r2.second
                 }
                 val r3 = d3.await()
                 if (r3 != null && r3.third) {
+                    dCf.cancel()
                     return@coroutineScope r3.first to r3.second
                 }
 
@@ -1407,9 +1562,17 @@ class ExoPlayerService : BasePlaybackService() {
                     if (!authUrl.isNullOrBlank()) {
                         val rAuth = probeMaster(authUrl, false)
                         if (rAuth != null && rAuth.third) {
+                            dCf.cancel()
                             return@coroutineScope rAuth.first to false
                         }
                     }
+                }
+
+                // Scudo anti-stallo Amazon IVS (es. Tumblurr): se TUTTI i token e proxy live hanno pubblicità cucite lato server,
+                // apri istantaneamente lo stream CloudFront Live-Edge 1080p60 (~2.5s dalla diretta, 0% pre-roll e 0% mid-roll sempre!)
+                val cfLiveMasterUri = dCf.await()
+                if (!cfLiveMasterUri.isNullOrBlank()) {
+                    return@coroutineScope cfLiveMasterUri to false
                 }
 
                 val anyReachable = listOfNotNull(r0, r1, r2, r3).firstOrNull()
@@ -1925,11 +2088,16 @@ class ExoPlayerService : BasePlaybackService() {
                             }
                             videoSwapActive -> {
                                 currentVideoSwapItem += 1
-                                val totalCandidates = (videoSwapList?.size ?: 0) + TWIXY_DEFAULT_PROXIES.size
+                                val totalCandidates = (videoSwapList?.size ?: 0) + TWIXY_DEFAULT_PROXIES.size + 1
                                 if (currentVideoSwapItem < totalCandidates) {
                                     secondaryPlayerTimerJob?.cancel()
                                     secondaryPlayerTimerJob = lifecycleScope.launch {
                                         delay(3.minutes)
+                                        var extraChecks = 0
+                                        while (playingAds && extraChecks < 28) {
+                                            delay(15_000.milliseconds)
+                                            extraChecks += 1
+                                        }
                                         videoSwapActive = false
                                         serviceListener?.toast(R.string.stopping_video_swap, Toast.LENGTH_SHORT)
                                         stopSecondaryPlayer2()
@@ -1963,11 +2131,18 @@ class ExoPlayerService : BasePlaybackService() {
             }.build()
             player.addListener(playerListener)
             val swapSize = videoSwapList?.size ?: 0
-            val fallbackProxy = if (!proxy && videoSwap == null && currentVideoSwapItem >= swapSize) {
-                TWIXY_DEFAULT_PROXIES.getOrNull(currentVideoSwapItem - swapSize)
+            val isCfMidrollCandidate = !proxy && currentVideoSwapItem == 1
+            val adjustedProxyIdx = if (!proxy && currentVideoSwapItem > 1) currentVideoSwapItem - 1 else currentVideoSwapItem
+            val effectiveVideoSwap = if (!proxy && !isCfMidrollCandidate) {
+                videoSwapList?.getOrNull(adjustedProxyIdx)
+            } else null
+            val fallbackProxy = if (!proxy && !isCfMidrollCandidate && effectiveVideoSwap == null && adjustedProxyIdx >= swapSize) {
+                TWIXY_DEFAULT_PROXIES.getOrNull(adjustedProxyIdx - swapSize)
             } else null
             val url = if (streamProxy != null) {
                 quality?.url
+            } else if (isCfMidrollCandidate) {
+                channelLogin?.let { ch -> resolveCloudFrontLiveEdgePlaylistUri(ch, singleVariantForSecondary = true) }
             } else if (fallbackProxy != null) {
                 val ch = channelLogin?.trim()?.lowercase()
                 val masterProxyUrl = if (!ch.isNullOrEmpty()) {
@@ -1990,7 +2165,7 @@ class ExoPlayerService : BasePlaybackService() {
                     }
                 } else null
             } else {
-                if (videoSwap != null) {
+                if (effectiveVideoSwap != null) {
                     val playlistUrl = channelLogin?.let { channelLogin ->
                         try {
                             xtraModule.playerRepository.loadStreamPlaylistUrl(
@@ -1998,8 +2173,8 @@ class ExoPlayerService : BasePlaybackService() {
                                 networkLibrary = networkLibrary,
                                 gqlHeaders = mapOf(C.HEADER_CLIENT_ID to "kimne78kx3ncx6brgo4mv6wki5h1ko"),
                                 channelLogin = channelLogin,
-                                platform = videoSwap.platform,
-                                playerType = videoSwap.playerType,
+                                platform = effectiveVideoSwap.platform,
+                                playerType = effectiveVideoSwap.playerType,
                                 supportedCodecs = prefs().getString(C.TOKEN_SUPPORTED_CODECS, "av1,h265,h264"),
                                 proxyPlaybackAccessToken = false,
                                 proxyHost = null,
@@ -2304,12 +2479,14 @@ class ExoPlayerService : BasePlaybackService() {
                         setLoadErrorHandlingPolicy(TwixyLoadErrorPolicy { proxy })
                     }.createMediaSource(
                         MediaItem.Builder().apply {
+                            val isCfSec = url.contains("twixy_live_edge=1")
                             setUri(url.toUri())
                             setMimeType(MimeTypes.APPLICATION_M3U8)
                             setLiveConfiguration(MediaItem.LiveConfiguration.Builder().apply {
                                 prefs().getString(C.PLAYER_LIVE_MIN_SPEED, "")?.toFloatOrNull()?.let { setMinPlaybackSpeed(it) }
                                 prefs().getString(C.PLAYER_LIVE_MAX_SPEED, "")?.toFloatOrNull()?.let { setMaxPlaybackSpeed(it) }
-                                prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "2000")?.toLongOrNull()?.let { setTargetOffsetMs(it) }
+                                val secOff = prefs().getString(C.PLAYER_LIVE_TARGET_OFFSET, "2000")?.toLongOrNull() ?: 2000L
+                                setTargetOffsetMs(if (isCfSec) secOff.coerceAtLeast(11_000L) else secOff)
                             }.build())
                         }.build()
                     )
@@ -2322,7 +2499,17 @@ class ExoPlayerService : BasePlaybackService() {
                 secondaryPlayer = player
                 serviceListener?.setPlayerSurface(true)
             } else {
-                fallbackToHiddenAdShield()
+                player.release()
+                val totalCandidates = (videoSwapList?.size ?: 0) + TWIXY_DEFAULT_PROXIES.size + 1
+                if (!proxy && videoSwapActive && currentVideoSwapItem + 1 < totalCandidates) {
+                    currentVideoSwapItem += 1
+                    startSecondaryPlayer(false)
+                } else if (proxy && proxyMediaPlaylist && streamProxyList?.getOrNull(currentStreamProxy + 1) != null) {
+                    currentStreamProxy += 1
+                    startSecondaryPlayer(true)
+                } else {
+                    fallbackToHiddenAdShield()
+                }
             }
         }
     }

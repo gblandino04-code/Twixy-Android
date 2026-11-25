@@ -1748,6 +1748,39 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
       }
     }
 
+    // Twixy CloudFront Live-Edge Shield: trasforma index-dvr.m3u8?twixy_live_edge=1 (EVENT attivo senza ENDLIST)
+    // in uno stream HLS Live sliding-window (ultimi 4 segmenti, refresh ogni 8s, 0% pre-roll e 0% mid-roll sempre!)
+    boolean isTwixyLiveEdge =
+        !playlistUri.isOpaque() && "1".equals(playlistUri.getQueryParameter("twixy_live_edge"));
+    if (isTwixyLiveEdge && !hasEndTag && !segments.isEmpty()) {
+      playlistType = HlsMediaPlaylist.PLAYLIST_TYPE_UNKNOWN;
+      startOffsetUs = C.TIME_UNSET;
+      preciseStart = false;
+      targetDurationUs = 8 * C.MICROS_PER_SECOND;
+      int keepTail = 4;
+      if (segments.size() > keepTail) {
+        int dropCount = segments.size() - keepTail;
+        long droppedDurationUs = 0;
+        for (int i = 0; i < dropCount; i++) {
+          droppedDurationUs += segments.get(i).durationUs;
+        }
+        List<Segment> trimmedSegments = new ArrayList<>(keepTail);
+        long runningStartUs = 0;
+        for (int i = dropCount; i < segments.size(); i++) {
+          Segment origSeg = segments.get(i);
+          trimmedSegments.add(
+              origSeg.copyWith(runningStartUs, origSeg.relativeDiscontinuitySequence));
+          runningStartUs += origSeg.durationUs;
+        }
+        segments = trimmedSegments;
+        mediaSequence += dropCount;
+        if (playlistStartTimeUs != 0) {
+          playlistStartTimeUs += droppedDurationUs;
+        }
+      }
+      interstitials.clear();
+    }
+
     if (playlistStartTimeUs == 0
         && previousMediaPlaylist != null
         && previousMediaPlaylist.hasProgramDateTime) {
