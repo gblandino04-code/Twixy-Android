@@ -1438,6 +1438,9 @@ class ExoPlayerService : BasePlaybackService() {
             null
         }
     }
+
+    /**
+     * Pre-flight parallelo anti-pre-roll e anti-packet-loss (stile Twixy PC):
      * prima che ExoPlayer apra lo stream a t=0s, verifica in parallelo Luminous EU / EU2 / PS4 / AS
      * e restituisce la prima playlist 1080p60 con 0 segmenti pubblicitari!
      */
